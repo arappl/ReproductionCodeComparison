@@ -1,135 +1,129 @@
+# ## A.1 ESTIMATION ACCURACY #################################################
+rm(list = ls())
+if (!require("parallel")) install.packages("parallel")
+if (!require("JM")) install.packages("JM")
+if (!require("joineRML")) install.packages("joineRML")
+if (!require("assertthat")) install.packages("assertthat")
 
-# ## FUNCTIONS ###########################################################
-cvini <- function(x, n, n_i, alphasim, beta, betas, betals, betatimeind, lambda, betat = 0, noninf = 0, noninfs = 0, noninfls = 0, 
-                  alphaini = .001, k = 10, grid1 = NULL, grid2 = NULL, grid3 = NULL){
+# path <- "/home/arappl/Dokumente/04_Vergleich_No4/"
+# setwd()
+path <- getwd()
+sub_dir <- "Results"
+dir.create(file.path(path, sub_dir))
+sub_dir <- "JM_code_snippets"
+dir.create(file.path(path, sub_dir))
 
-  set.seed(seeds[x])
-  df <- simJM(n = n, n_i = n_i, alphasim = alpha, beta = beta, betas = betas, betals = betals, betatimeind = betatimeind, lambda = lambda, 
+estfun <- function(x, model, n, n_i, alpha, beta, betas, betals, betatimeind, lambda, betat = 0, noninf = 0, noninfs = 0, noninfls = 0, ctrl = ctrl) {
+  repeat{
+    gc()
+    # +++++ Data Simulation +++++ # 
+    # simulate data with specific seed, if fits fail, change the seed (i <-  i + 1) and try again
+    i <- i + 1
+    # print(c(x, i))
+    seed <- 8469 + x*1000 + i
+    set.seed(seed)
+    dat <- simJM(n = n, n_i = n_i, alpha = alpha, beta = beta, betas = betas, betals = betals, betatimeind = betatimeind, lambda = lambda, 
+                 betat = betat, noninf = noninf, noninfs = noninfs, noninfls = noninfls)
+    
+    df <- with(dat, data.frame(id, y, X, Xls))
+    df.id <- with(dat, data.frame(unique(id), Xs, T_surv, delta))
+    
+    # little workaround to be able to run JM flexibly across various models: jointModel() resorts to the formula call of lme(). If 
+    # this formula is passed down through a function to lme() (like in mjoint()), the lme output stores a string of this function. When 
+    # jointModel() tries to convert this string into a formula again it will run into an error. Therefore we'll store a code snippet with 
+    # the model specific formula in a seperate file and source it back in. Thus jointModel() can access a correct formula and we can only 
+    # one function instead of six (or more respectively) versions of it :).
+    if (x == 1) { 
+      file_ini <- file(paste0(path, "/", sub_dir, "/", "Model_", model, ".txt"))
+      
+      writeLines(c(
+        "lmeIni <- function(df = df){",
+        paste0("fitLME <- tryCatch({ lme(", paste0("y~", paste(names(df)[3 : ncol(df)], collapse = "+")),","),
+        "                             data = df, random = ~ time | id, na.action = na.exclude, control =lmeControl(opt='optim')) }, ",
+        paste0("           error=function(e){cat(","'ERROR :'", ", conditionMessage(e),"," '/n'",")}) "),
+        "}"
+        )
+        , file_ini)
+      
+      close(file_ini)
+    }
+    
+    # +++++ JM fit +++++ # 
+    source(paste0(path, "/", sub_dir, "/", "Model_", model, ".txt"))
+    fitLME <- lmeIni(df = df)
+    fitSURV <- coxph(Surv(time = T_surv, event=delta)~ Xs, data = df.id, x = TRUE, na.action = na.exclude)
+    fitJM <-  tryCatch({ jointModel(fitLME, fitSURV, timeVar = "time", method="piecewise-PH-aGH")
+    }, error=function(e){cat("ERROR :",conditionMessage(e), "/n")})
+
+    # +++++ joineRML fit +++++ # 
+    # if fitJM returnd no error, fit joineRML
+    if (!is.error(fitJM) && !is.null(fitJM)) {
+      df <- merge(df, df.id, by.x = "id", by.y = "unique.id.")
+
+      fitJRML <- tryCatch({mjoint(formLongFixed = list(as.formula(paste0("y~",paste(names(df)[3:(ncol(df)-3)], collapse="+")))),
+                                  formLongRandom = list(~ time | id),
+                                  formSurv = Surv(time = T_surv, event = delta) ~ Xs,
+                                  data = list(df),
+                                  timeVar = "time")},
+                          error=function(e){cat("ERROR :",conditionMessage(e), "/n")})
+      # if fitJRML is also no error, break the repeat loop, else increase i and try again
+      if (!is.error(fitJRML) && !is.null(fitJRML)) { break }
+    }
+  }
+  return(list(fitJM, fitJRML, seed))
+}
+
+
+n = 100
+n_i = 5
+alpha = 0.1
+lambda = 0.6
+
+noninf <- noninfs <- noninfls <- 0
+
+# w/o fixed time effect
+betas = 0.1
+beta = c(1.5,-0.5, 0.7, 1.3, 0.3, 0.5)
+betat = 0.4
+betals = c(0.9, 0.3, -1, 0.2, -0.4)
+betatimeind = 0
+
+i <- 0
+
+AM1 <- lapply(1:100, estfun, model = "AM1", n = n, n_i = n_i, alpha = alpha, beta = beta[1], betas = betas, betals = 0, betatimeind = betatimeind, lambda = lambda,
+                        betat = betat, noninf = noninf, noninfs = noninfs, noninfls = noninfls)
+save(AM1,file=paste0(path, "Results/", "AM1_results.RData"))
+
+AM3 <- lapply(1:100, estfun, model = "AM3", n = n, n_i = n_i, alpha = alpha, beta = beta, betas = betas, betals = 0, betatimeind = betatimeind, lambda = lambda,
               betat = betat, noninf = noninf, noninfs = noninfs, noninfls = noninfls)
-  
-  if (exists("rel")) {
-    if (is.null(grid1)) {grid1 <- c(seq(3, 27, 3), seq(30, 360, 30))}
-    if (is.null(grid2)) {grid2 <- c(seq(3, 27, 3), seq(30, 360, 30))}
-    if (is.null(grid3)) {grid3 <- c(seq(3, 27, 3), seq(30, 360, 30))}
-  } else {
-    if (is.null(grid1)) {grid1 <- c(seq(3, 27, 3), seq(30, 360, 30))}
-    if (is.null(grid2)) {grid2 <- c(seq(3, 27, 3), seq(30, 360, 30))}
-    if (is.null(grid3)) {grid3 <- c(seq(3, 27, 3), seq(30, 360, 30))}
-  }
-  
-  ## 3.1 split data set into k=10 folds --------------------------------------------------------- ##
-  set.seed(1258149)
-  m <- length(unique(df$id))/k # size of each subset
-  vec <- rep(seq(1:k),each=m)
-  testset <- sample(vec, replace = F)
-  
-  ## 3.2 cross validate each fold via prediction (likelihood) ---------------------------------- ##
-  ## inner loop through all k folds of data set (actual cross validation)
-  resarr <- indarr <- array(0,c(length(grid1),length(grid2),length(grid3)),
-                            dimnames = list(grid1 ,grid2, grid3))
-  
-  # grid1=ml, grid2=ms, grid3=mls
-  
-  ## homebrew subset function for lists
-  sset <- function(d, filter){
-    cand_un <- which(unique(df$id) %in% unique(df$id)[filter])
-    cand <- which(df$id %in% unique(df$id)[filter])
-    
-    if(is.matrix(d)){
-      if(dim(d)[1]==length(unique(df$id))){d[cand_un,,drop=FALSE]}else{d[cand,,drop=FALSE]}
-    }else{
-      if(length(d)==length(unique(df$id))){d[cand_un]}else{d[cand]}
-    }
-  }
-  
-  for(kk in seq(1:k)){
-    sdf <- lapply(df, sset, testset!=kk)
-    kdf <- lapply(df, sset, testset==kk)
-    cv.res <- tryCatch({cvres2(data.train = sdf, data.pred = kdf, grid1 = grid1, grid2 = grid2, grid3 = grid3,
-                               betatimeind = betatimeind, alpha = alphaini)},
-                       error=function(e){cat("ERROR :",conditionMessage(e), "\n")})
-    
-    indarr <- indarr + cv.res$indarr
-    resarr <- resarr + cv.res$likarr
-    
-    print(kk)
-  }
-  
-  ## 3.3 combine results and find best set of iterations -------------------------------------- ##
-  meanarr <- resarr/(k - indarr) # divide by the number of folds, which worked
-  best <- which(meanarr == max(meanarr), arr.ind = T)
-  best.iter <- c(grid1[best[1]], grid2[best[2]], grid3[best[3]])
-  names(best.iter) <- c("ml","ms","mls")
-  return(list("best" = best.iter, "indarr" = indarr))
-}
+save(AM3,file=paste0(path, "Results/", "AM3_results.RData"))
 
-like_cv = function(y, betal, betas, betals, Xl, Xs, Xls,
-                   betatimeind, delta, T_surv, alpha, lambda, sigma2, id) {
-  first = rep(FALSE, length(id))
-  for(i in unique(id)){
-    first[which.max(id==i)] = TRUE
-  }
-  if(is.null(Xl)){
-    Xl = as.matrix(rep(1, length(y)))
-  }
-  beta_t = betals[betatimeind]
-  etals_m = (as.matrix(Xls[,-betatimeind])%*%as.matrix(betals[-betatimeind]))[first==1]
-  etals = Xls%*%betals
-  etal = cbind(1,Xl)%*%betal
-  etas = Xs%*%betas
-  
-  if(length(beta_t) != 0) {
-    if (beta_t != 0) {
-      integral = lambda*exp(etas)*((exp(alpha*etals_m + alpha*beta_t*T_surv) - exp(alpha*etals_m))*(1/(alpha*beta_t)))
-    }else{
-      integral = lambda*T_surv*exp(etas + alpha*etals_m)
-    }
-  } else {
-    integral = lambda*T_surv*exp(etas + alpha*etals_m)
-  } 
-  
-  surv = delta*(log(lambda) + etas + alpha*etals_m + alpha*beta_t*T_surv) - integral
-  long = log(1/sqrt(2*pi*sigma2)) - (y - etals - etal)^2/(2*sigma2)
-  like = sum(surv) + sum(long)
-  return(like)
-}
+AM5 <- lapply(1:100, estfun, model = "AM5", n = n, n_i = n_i, alpha = alpha, beta = beta, betas = betas, betals = betals, betatimeind = betatimeind, lambda = lambda,
+              betat = betat, noninf = noninf, noninfs = noninfs, noninfls = noninfls)
+save(AM5,file=paste0(path, "Results/", "AM5_results.RData"))
 
-cvres2 <- function(data.train, data.pred, grid1 = grid1, grid2 = grid2, grid3 = grid3, betatimeind, alpha = alpha){
-  
-  likarr <- indarr <- array(0,c(length(grid1), length(grid2), length(grid3)),
-                            dimnames = list(grid1 ,grid2, grid3))
-  # grid1=ml, grid2=ms, grid3=mls
-  
-  
-  for(ml_akt in grid1){
-    for(ms_akt in grid2){
-      for(mls_akt in grid3){
-        # print(c(ml_akt, ms_akt, mls_akt))
-        mod <- tryCatch({JMboost(y = data.train$y, Xl = data.train$X, Xs = data.train$Xs, Xls = data.train$Xls, delta = data.train$delta,
-                                 T_long = data.train$T_long, T_surv = data.train$T_surv, id = data.train$id,
-                                 mstop_l = ml_akt, mstop_s = ms_akt, mstop_ls = mls_akt, betatimeind = betatimeind, alpha = alpha, verbose = F)},
-                        error=function(e){cat("ERROR :",conditionMessage(e), "\n")})
-        
-        like <-  tryCatch({like_cv(y=data.pred$y,  Xl=data.pred$X, Xs=data.pred$Xs, Xls=data.pred$Xls, delta=data.pred$delta,
-                                   T_surv = data.pred$T_surv, id=data.pred$id, betatimeind=betatimeind, betal=as.matrix(mod$betal),
-                                   betas=as.matrix(mod$betas) ,betals=as.matrix(mod$betals), alpha=mod$alpha, lambda=mod$lambda,
-                                   sigma2=mod$sigma2)},
-                          error=function(e){cat("ERROR :",conditionMessage(e), "\n")})
-        
-        if (is.null(mod)) {
-          likarr[as.character(ml_akt), as.character(ms_akt), as.character(mls_akt)] <-  0
-          indarr[as.character(ml_akt), as.character(ms_akt), as.character(mls_akt)] <-  1
-        } else {
-          likarr[as.character(ml_akt), as.character(ms_akt), as.character(mls_akt)] <-  like
-        }
-        
-      }
-    }
-  }
-  # return(diaarr)
-  return(list("likarr" = likarr, "indarr" = indarr))
-}
 
+## w/ fixed time effect
+betas = 0.1
+beta = c(1.5,-0.5, 0.7, 1.3, 0.3, 0.5)
+betals = c(0.4, 0.9, 0.3, -1, 0.2, -0.4)
+betatimeind = 1
+
+i <- 0
+
+AM2 <- lapply(1:1, estfun, model = "AM2", n = n, n_i = n_i, alpha = alpha, beta = beta[1], betas = betas, betals = betals[1], betatimeind = betatimeind, lambda = lambda,
+              noninf = noninf, noninfs = noninfs, noninfls = noninfls)
+save(AM2,file=paste0(path, "Results/", "AM2_results.RData"))
+
+AM4 <- lapply(1:1, estfun, model = "AM4", n = n, n_i = n_i, alpha = alpha, beta = beta, betas = betas, betals = betals[1], betatimeind = betatimeind, lambda = lambda,
+              noninf = noninf, noninfs = noninfs, noninfls = noninfls)
+save(AM4,file=paste0(path, "Results/", "AM4_results.RData"))
+
+AM6 <- lapply(1:1, estfun, model = "AM6", n = n, n_i = n_i, alpha = alpha, beta = beta, betas = betas, betals = betals, betatimeind = betatimeind, lambda = lambda,
+              noninf = noninf, noninfs = noninfs, noninfls = noninfls)
+save(AM6,file=paste0(path, "Results/", "AM6_results.RData"))
+
+# ## A.4 FUNCTIONS ###########################################################
 simJM <- function(n, n_i, alphasim,
                   beta, betas, betals, betatimeind, lambda, betat = 0, noninf = 0, noninfs = 0, noninfls = 0) {
   
@@ -269,6 +263,136 @@ simJM <- function(n, n_i, alphasim,
     "T_surv" = T_surv,
     #### Censoring indicator
     "delta" = delta))
+}
+
+cvini <- function(x, n, n_i, alphasim, beta, betas, betals, betatimeind, lambda, betat = 0, noninf = 0, noninfs = 0, noninfls = 0, 
+                  alphaini = .001, k = 10, grid1 = NULL, grid2 = NULL, grid3 = NULL){
+
+  set.seed(seeds[x])
+  df <- simJM(n = n, n_i = n_i, alphasim = alpha, beta = beta, betas = betas, betals = betals, betatimeind = betatimeind, lambda = lambda, 
+              betat = betat, noninf = noninf, noninfs = noninfs, noninfls = noninfls)
+  
+  if (exists("rel")) {
+    if (is.null(grid1)) {grid1 <- c(seq(3, 27, 3), seq(30, 360, 30))}
+    if (is.null(grid2)) {grid2 <- c(seq(3, 27, 3), seq(30, 360, 30))}
+    if (is.null(grid3)) {grid3 <- c(seq(3, 27, 3), seq(30, 360, 30))}
+  } else {
+    if (is.null(grid1)) {grid1 <- c(seq(3, 27, 3), seq(30, 360, 30))}
+    if (is.null(grid2)) {grid2 <- c(seq(3, 27, 3), seq(30, 360, 30))}
+    if (is.null(grid3)) {grid3 <- c(seq(3, 27, 3), seq(30, 360, 30))}
+  }
+  
+  ## 3.1 split data set into k=10 folds --------------------------------------------------------- ##
+  set.seed(1258149)
+  m <- length(unique(df$id))/k # size of each subset
+  vec <- rep(seq(1:k),each=m)
+  testset <- sample(vec, replace = F)
+  
+  ## 3.2 cross validate each fold via prediction (likelihood) ---------------------------------- ##
+  ## inner loop through all k folds of data set (actual cross validation)
+  resarr <- indarr <- array(0,c(length(grid1),length(grid2),length(grid3)),
+                            dimnames = list(grid1 ,grid2, grid3))
+  
+  # grid1=ml, grid2=ms, grid3=mls
+  
+  ## homebrew subset function for lists
+  sset <- function(d, filter){
+    cand_un <- which(unique(df$id) %in% unique(df$id)[filter])
+    cand <- which(df$id %in% unique(df$id)[filter])
+    
+    if(is.matrix(d)){
+      if(dim(d)[1]==length(unique(df$id))){d[cand_un,,drop=FALSE]}else{d[cand,,drop=FALSE]}
+    }else{
+      if(length(d)==length(unique(df$id))){d[cand_un]}else{d[cand]}
+    }
+  }
+  
+  for(kk in seq(1:k)){
+    sdf <- lapply(df, sset, testset!=kk)
+    kdf <- lapply(df, sset, testset==kk)
+    cv.res <- tryCatch({cvres2(data.train = sdf, data.pred = kdf, grid1 = grid1, grid2 = grid2, grid3 = grid3,
+                               betatimeind = betatimeind, alpha = alphaini)},
+                       error=function(e){cat("ERROR :",conditionMessage(e), "\n")})
+    
+    indarr <- indarr + cv.res$indarr
+    resarr <- resarr + cv.res$likarr
+    
+    print(kk)
+  }
+  
+  ## 3.3 combine results and find best set of iterations -------------------------------------- ##
+  meanarr <- resarr/(k - indarr) # divide by the number of folds, which worked
+  best <- which(meanarr == max(meanarr), arr.ind = T)
+  best.iter <- c(grid1[best[1]], grid2[best[2]], grid3[best[3]])
+  names(best.iter) <- c("ml","ms","mls")
+  return(list("best" = best.iter, "indarr" = indarr))
+}
+
+like_cv = function(y, betal, betas, betals, Xl, Xs, Xls,
+                   betatimeind, delta, T_surv, alpha, lambda, sigma2, id) {
+  first = rep(FALSE, length(id))
+  for(i in unique(id)){
+    first[which.max(id==i)] = TRUE
+  }
+  if(is.null(Xl)){
+    Xl = as.matrix(rep(1, length(y)))
+  }
+  beta_t = betals[betatimeind]
+  etals_m = (as.matrix(Xls[,-betatimeind])%*%as.matrix(betals[-betatimeind]))[first==1]
+  etals = Xls%*%betals
+  etal = cbind(1,Xl)%*%betal
+  etas = Xs%*%betas
+  
+  if(length(beta_t) != 0) {
+    if (beta_t != 0) {
+      integral = lambda*exp(etas)*((exp(alpha*etals_m + alpha*beta_t*T_surv) - exp(alpha*etals_m))*(1/(alpha*beta_t)))
+    }else{
+      integral = lambda*T_surv*exp(etas + alpha*etals_m)
+    }
+  } else {
+    integral = lambda*T_surv*exp(etas + alpha*etals_m)
+  } 
+  
+  surv = delta*(log(lambda) + etas + alpha*etals_m + alpha*beta_t*T_surv) - integral
+  long = log(1/sqrt(2*pi*sigma2)) - (y - etals - etal)^2/(2*sigma2)
+  like = sum(surv) + sum(long)
+  return(like)
+}
+
+cvres2 <- function(data.train, data.pred, grid1 = grid1, grid2 = grid2, grid3 = grid3, betatimeind, alpha = alpha){
+  
+  likarr <- indarr <- array(0,c(length(grid1), length(grid2), length(grid3)),
+                            dimnames = list(grid1 ,grid2, grid3))
+  # grid1=ml, grid2=ms, grid3=mls
+  
+  
+  for(ml_akt in grid1){
+    for(ms_akt in grid2){
+      for(mls_akt in grid3){
+        # print(c(ml_akt, ms_akt, mls_akt))
+        mod <- tryCatch({JMboost(y = data.train$y, Xl = data.train$X, Xs = data.train$Xs, Xls = data.train$Xls, delta = data.train$delta,
+                                 T_long = data.train$T_long, T_surv = data.train$T_surv, id = data.train$id,
+                                 mstop_l = ml_akt, mstop_s = ms_akt, mstop_ls = mls_akt, betatimeind = betatimeind, alpha = alpha, verbose = F)},
+                        error=function(e){cat("ERROR :",conditionMessage(e), "\n")})
+        
+        like <-  tryCatch({like_cv(y=data.pred$y,  Xl=data.pred$X, Xs=data.pred$Xs, Xls=data.pred$Xls, delta=data.pred$delta,
+                                   T_surv = data.pred$T_surv, id=data.pred$id, betatimeind=betatimeind, betal=as.matrix(mod$betal),
+                                   betas=as.matrix(mod$betas) ,betals=as.matrix(mod$betals), alpha=mod$alpha, lambda=mod$lambda,
+                                   sigma2=mod$sigma2)},
+                          error=function(e){cat("ERROR :",conditionMessage(e), "\n")})
+        
+        if (is.null(mod)) {
+          likarr[as.character(ml_akt), as.character(ms_akt), as.character(mls_akt)] <-  0
+          indarr[as.character(ml_akt), as.character(ms_akt), as.character(mls_akt)] <-  1
+        } else {
+          likarr[as.character(ml_akt), as.character(ms_akt), as.character(mls_akt)] <-  like
+        }
+        
+      }
+    }
+  }
+  # return(diaarr)
+  return(list("likarr" = likarr, "indarr" = indarr))
 }
 
 JMboost = function(y, Xl = NULL, Xs = NULL, Xls = NULL, delta, T_long, T_surv, id, alpha=.001, lambda=.5,
