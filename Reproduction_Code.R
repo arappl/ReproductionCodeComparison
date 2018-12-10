@@ -70,7 +70,19 @@ estfun <- function(x, model, n, n_i, alpha, beta, betas, betals, betatimeind, la
       if (!is.error(fitJRML) && !is.null(fitJRML)) { break }
     }
   }
-  return(list(fitJM, fitJRML, seed))
+  # +++++ JMboost 'fit' +++++ # 
+  if (betatimeind == 0) {
+    time.effect <- FALSE
+  } else {
+    time.effect <- TRUE
+  }
+  
+  fitJMb <- tryCatch({JMboostc(y = dat$y, Xl = dat$X, Xs = dat$Xs, Xls = dat$Xls, time.effect = time.effect,
+                     delta = dat$delta, T_long = dat$T_long, T_surv = dat$T_surv, id = dat$id, 
+                     mstop_l = 100000, mstop_ls = 100000, mstop_s = 100000, verbose = TRUE)},
+                     error=function(e){cat("ERROR :",conditionMessage(e), "/n")})
+
+  return(list(fitJM, fitJRML, fitJMb, seed))
 }
 
 
@@ -1043,22 +1055,22 @@ JMboostc = function(y, Xl = NULL, Xs = NULL, Xls = NULL, delta, T_long, T_surv, 
     m <- m + 1
     cond <- abs((LIKE[m - 1] - LIKE[m - 2]) / LIKE[m - 1])
     
-    if (m == mstop || m%%1000 == 0) {
-      intermediate <- list(GAMMA0 = GAMMA0, GAMMA1 = GAMMA1, BETAL = BETAL, BETAS = BETAS,
-                           BETALS = BETALS, BETAT=BETAT, INT=INT, ALPHA = ALPHA, LAMBDA = LAMBDA, SIGMA2 = SIGMA2,
-                           gamma0 = gamma0, gamma1 = gamma1, betal = betal, betas = betas, betals = betals,
-                           betat=betat, int=int, alpha = alpha, lambda = lambda,  sigma2 = sigma2)
-      save(intermediate, file = paste0(path, "01_Datenbeispiel/03_Converge_Zwischenspeicher/Dat_conv_m", m, ".RData"))
-      rm("intermediate")
-    }
+    # if (m == mstop || m%%1000 == 0) {
+    #   intermediate <- list(GAMMA0 = GAMMA0, GAMMA1 = GAMMA1, BETAL = BETAL, BETAS = BETAS,
+    #                        BETALS = BETALS, BETAT=BETAT, INT=INT, ALPHA = ALPHA, LAMBDA = LAMBDA, SIGMA2 = SIGMA2,
+    #                        gamma0 = gamma0, gamma1 = gamma1, betal = betal, betas = betas, betals = betals,
+    #                        betat=betat, int=int, alpha = alpha, lambda = lambda,  sigma2 = sigma2)
+    #   save(intermediate, file = paste0(path, "01_Datenbeispiel/03_Converge_Zwischenspeicher/Dat_conv_m", m, ".RData"))
+    #   rm("intermediate")
+    # }
     
     if(verbose){
-      if(m%%1000 == 0){print(m)}
-      # print(m)
+      # if(m%%1000 == 0){print(m)}
+      print(m)
     }
     
   }
-  conv.iter <- max(which(fitJMbcon$INT != 0)) + 1
+  conv.iter <- max(which(INT != 0)) + 1
   
   structure(list(GAMMA0 = GAMMA0, GAMMA1 = GAMMA1, BETAL = BETAL, BETAS = BETAS,
                  BETALS = BETALS, BETAT=BETAT, INT=INT, ALPHA = ALPHA, LAMBDA = LAMBDA, SIGMA2 = SIGMA2,
