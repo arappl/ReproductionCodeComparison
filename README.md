@@ -3,6 +3,8 @@ Code to reproduce analysis of package comparison
 
 Structure
 A. Simulation
+A.0. Functions
+
 A.1. Accuracy 
 A.1.1 Data generation
 A.1.2 Estimation with JM, JRML and JMb
@@ -36,6 +38,6 @@ A.3.1 Data generation
 A.3.2 Prediction with results of JM, JRML and JMb
 A.3.3 Evaluation
 ----------------------------------------------------- # 
-A.4. Functions
+
 ##################################################### # 
 B. Data

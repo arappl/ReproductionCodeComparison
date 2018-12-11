@@ -1,5 +1,6 @@
-estfun <- function(x, model, n, n_i, alpha, beta, betas, betals, betatimeind, lambda, betat = 0, noninf = 0, noninfs = 0, noninfls = 0, 
-                   k = 10, grid1 = NULL, grid2 = NULL, grid3 = NULL) {
+estfun <- function(x, model, n, n_i, alpha, beta, betas, betals, betatimeind, lambda, betat = 0, noninf = 0, noninfs = 0, noninfls = 0, method = "boost",
+                   k = 10, grid1 = NULL, grid2 = NULL, grid3 = NULL) # method = c("boost", "converge")
+  {
   repeat{
     # simulate data with specific seed, if fits fail, change the seed (i <-  i + 1)
     i <- i + 1
@@ -54,7 +55,7 @@ estfun <- function(x, model, n, n_i, alpha, beta, betas, betals, betatimeind, la
     }
   }
   
-  # +++++ JMboost Cross-validation (cv) +++++ # 
+  # +++++ JMboost 'fit' part +++++ # 
   if (betatimeind == 0) {
     time.effect <- FALSE
   } else {
@@ -66,19 +67,21 @@ estfun <- function(x, model, n, n_i, alpha, beta, betas, betals, betatimeind, la
     fitJMb <- tryCatch({JMboostc(y = dat$y, Xl = dat$X, Xs = dat$Xs, Xls = dat$Xls, time.effect = time.effect,
                                delta = dat$delta, T_long = dat$T_long, T_surv = dat$T_surv, id = dat$id, 
                                mstop_l = 100000, mstop_ls = 100000, mstop_s = 100000, verbose = FALSE)},
-                       error=function(e){cat("ERROR :",conditionMessage(e), "/n")})
+                       error=function(e){cat("ERROR :", conditionMessage(e), "/n")})
+    
     return(list(fitJM, fitJRML, fitJMb, seed))
+    
   } else {
     # +++++ JMboost Cross-validation (cv) +++++ # 
     # cv_result <- cvini(x = x, df = dat, time.effect = time.effect)
     # best_iter <- cv_result[[1]]
     best_iter <- cvini(x = x, df = dat, time.effect = time.effect, k = k)
     
-    # +++++ JMboost +++++ # 
+    # +++++ JMboost 'fit' +++++ # 
     fitJMb <- tryCatch({JMboost(y = dat$y, Xl = dat$X, Xs = dat$Xs, Xls = dat$Xls, time.effect = time.effect,
                                 delta = dat$delta, T_long = dat$T_long, T_surv = dat$T_surv, id = dat$id, 
-                                mstop_l = best_iter[1], mstop_s = best_iter[2], mstop_ls = bst_iter[3], verbose = FALSE)},
-                       error=function(e){cat("ERROR :",conditionMessage(e), "/n")})
+                                mstop_l = best_iter[1], mstop_s = best_iter[2], mstop_ls = best_iter[3], verbose = FALSE)},
+                       error=function(e){cat("ERROR :", conditionMessage(e), "/n")})
     
     return(list(fitJM, fitJRML, fitJMb, best_iter, seed))
   }

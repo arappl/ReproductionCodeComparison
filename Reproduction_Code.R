@@ -13,128 +13,6 @@ dir.create(file.path(path, sub_dir))
 sub_dir <- "JM_code_snippets"
 dir.create(file.path(path, sub_dir))
 
-estfun <- function(x, model, n, n_i, alpha, beta, betas, betals, betatimeind, lambda, betat = 0, noninf = 0, noninfs = 0, noninfls = 0, ctrl = ctrl) {
-  repeat{
-    gc()
-    # +++++ Data Simulation +++++ # 
-    # simulate data with specific seed, if fits fail, change the seed (i <-  i + 1) and try again
-    i <- i + 1
-    # print(c(x, i))
-    seed <- 8469 + x*1000 + i
-    set.seed(seed)
-    dat <- simJM(n = n, n_i = n_i, alpha = alpha, beta = beta, betas = betas, betals = betals, betatimeind = betatimeind, lambda = lambda, 
-                 betat = betat, noninf = noninf, noninfs = noninfs, noninfls = noninfls)
-    
-    df <- with(dat, data.frame(id, y, X, Xls))
-    df.id <- with(dat, data.frame(unique(id), Xs, T_surv, delta))
-    
-    # little workaround to be able to run JM flexibly across various models: jointModel() resorts to the formula call of lme(). If 
-    # this formula is passed down through a function to lme() (like in mjoint()), the lme output stores a string of this function. When 
-    # jointModel() tries to convert this string into a formula again it will run into an error. Therefore we'll store a code snippet with 
-    # the model specific formula in a seperate file and source it back in. Thus jointModel() can access a correct formula and we can only 
-    # one function instead of six (or more respectively) versions of it :).
-    if (x == 1) { 
-      file_ini <- file(paste0(path, "/", sub_dir, "/", "Model_", model, ".txt"))
-      
-      writeLines(c(
-        "lmeIni <- function(df = df){",
-        paste0("fitLME <- tryCatch({ lme(", paste0("y~", paste(names(df)[3 : ncol(df)], collapse = "+")),","),
-        "                             data = df, random = ~ time | id, na.action = na.exclude, control =lmeControl(opt='optim')) }, ",
-        paste0("           error=function(e){cat(","'ERROR :'", ", conditionMessage(e),"," '/n'",")}) "),
-        "}"
-        )
-        , file_ini)
-      
-      close(file_ini)
-    }
-    
-    # +++++ JM fit +++++ # 
-    source(paste0(path, "/", sub_dir, "/", "Model_", model, ".txt"))
-    fitLME <- lmeIni(df = df)
-    fitSURV <- coxph(Surv(time = T_surv, event=delta)~ Xs, data = df.id, x = TRUE, na.action = na.exclude)
-    fitJM <-  tryCatch({ jointModel(fitLME, fitSURV, timeVar = "time", method="piecewise-PH-aGH")
-    }, error=function(e){cat("ERROR :",conditionMessage(e), "/n")})
-
-    # +++++ joineRML fit +++++ # 
-    # if fitJM returnd no error, fit joineRML
-    if (!is.error(fitJM) && !is.null(fitJM)) {
-      df <- merge(df, df.id, by.x = "id", by.y = "unique.id.")
-
-      fitJRML <- tryCatch({mjoint(formLongFixed = list(as.formula(paste0("y~",paste(names(df)[3:(ncol(df)-3)], collapse="+")))),
-                                  formLongRandom = list(~ time | id),
-                                  formSurv = Surv(time = T_surv, event = delta) ~ Xs,
-                                  data = list(df),
-                                  timeVar = "time")},
-                          error=function(e){cat("ERROR :",conditionMessage(e), "/n")})
-      # if fitJRML is also no error, break the repeat loop, else increase i and try again
-      if (!is.error(fitJRML) && !is.null(fitJRML)) { break }
-    }
-  }
-  # +++++ JMboost 'fit' +++++ # 
-  if (betatimeind == 0) {
-    time.effect <- FALSE
-  } else {
-    time.effect <- TRUE
-  }
-  
-  fitJMb <- tryCatch({JMboostc(y = dat$y, Xl = dat$X, Xs = dat$Xs, Xls = dat$Xls, time.effect = time.effect,
-                     delta = dat$delta, T_long = dat$T_long, T_surv = dat$T_surv, id = dat$id, 
-                     mstop_l = 100000, mstop_ls = 100000, mstop_s = 100000, verbose = TRUE)},
-                     error=function(e){cat("ERROR :",conditionMessage(e), "/n")})
-
-  return(list(fitJM, fitJRML, fitJMb, seed))
-}
-
-
-n = 100
-n_i = 5
-alpha = 0.1
-lambda = 0.6
-
-noninf <- noninfs <- noninfls <- 0
-
-# w/o fixed time effect
-betas = 0.1
-beta = c(1.5,-0.5, 0.7, 1.3, 0.3, 0.5)
-betat = 0.4
-betals = c(0.9, 0.3, -1, 0.2, -0.4)
-betatimeind = 0
-
-i <- 0
-
-AM1 <- lapply(1:100, estfun, model = "AM1", n = n, n_i = n_i, alpha = alpha, beta = beta[1], betas = betas, betals = 0, betatimeind = betatimeind, lambda = lambda,
-                        betat = betat, noninf = noninf, noninfs = noninfs, noninfls = noninfls)
-save(AM1,file=paste0(path, "Results/", "AM1_results.RData"))
-
-AM3 <- lapply(1:100, estfun, model = "AM3", n = n, n_i = n_i, alpha = alpha, beta = beta, betas = betas, betals = 0, betatimeind = betatimeind, lambda = lambda,
-              betat = betat, noninf = noninf, noninfs = noninfs, noninfls = noninfls)
-save(AM3,file=paste0(path, "Results/", "AM3_results.RData"))
-
-AM5 <- lapply(1:100, estfun, model = "AM5", n = n, n_i = n_i, alpha = alpha, beta = beta, betas = betas, betals = betals, betatimeind = betatimeind, lambda = lambda,
-              betat = betat, noninf = noninf, noninfs = noninfs, noninfls = noninfls)
-save(AM5,file=paste0(path, "Results/", "AM5_results.RData"))
-
-
-## w/ fixed time effect
-betas = 0.1
-beta = c(1.5,-0.5, 0.7, 1.3, 0.3, 0.5)
-betals = c(0.4, 0.9, 0.3, -1, 0.2, -0.4)
-betatimeind = 1
-
-i <- 0
-
-AM2 <- lapply(1:1, estfun, model = "AM2", n = n, n_i = n_i, alpha = alpha, beta = beta[1], betas = betas, betals = betals[1], betatimeind = betatimeind, lambda = lambda,
-              noninf = noninf, noninfs = noninfs, noninfls = noninfls)
-save(AM2,file=paste0(path, "Results/", "AM2_results.RData"))
-
-AM4 <- lapply(1:1, estfun, model = "AM4", n = n, n_i = n_i, alpha = alpha, beta = beta, betas = betas, betals = betals[1], betatimeind = betatimeind, lambda = lambda,
-              noninf = noninf, noninfs = noninfs, noninfls = noninfls)
-save(AM4,file=paste0(path, "Results/", "AM4_results.RData"))
-
-AM6 <- lapply(1:1, estfun, model = "AM6", n = n, n_i = n_i, alpha = alpha, beta = beta, betas = betas, betals = betals, betatimeind = betatimeind, lambda = lambda,
-              noninf = noninf, noninfs = noninfs, noninfls = noninfls)
-save(AM6,file=paste0(path, "Results/", "AM6_results.RData"))
-
 # ## A.4 FUNCTIONS ###########################################################
 simJM <- function(n, n_i, alphasim,
                   beta, betas, betals, betatimeind, lambda, betat = 0, noninf = 0, noninfs = 0, noninfls = 0) {
@@ -164,7 +42,7 @@ simJM <- function(n, n_i, alphasim,
         Xls[,j] <- (Xls[,j]-mean(Xls[,j]))/sd(Xls[,j])
       }
     }
-  }else{Xls =matrix(1,nrow=n*n_i, ncol=1); betatime = 0} #  matrix(rep(rnorm(n), each = n_i), ncol=1, nrow=n*n_i); betatime = 0}
+  }else{Xls =matrix(1,nrow=n*n_i, ncol=1); betatime = 0} 
   eta_ls_mean = eta_ls_mean + Xls%*%betals + betatime*time
   
   X <- matrix(nrow = n*n_i, ncol = length(beta))
@@ -195,7 +73,6 @@ simJM <- function(n, n_i, alphasim,
   for(i in 1:n){
     if(!is.na(T_surv[i])){
       if(T_surv[i]>max(time_mat[,i])){T_surv[i] = max(time_mat[,i]); delta[i] = 0}
-      # if(T_surv[i]>1){T_surv[i] = max(time_mat[,i]); delta[i] = 0} # funktioniert nicht mit dieser Parameterkombination, es fallen Individuen schon bei der ersten Beobachtung raus
       else if(which.max(time_mat[,i]>T_surv[i])<=n_i){time_mat[which.max(time_mat[,i]>T_surv[i]):n_i,i] = 42}
     }
   }
@@ -217,7 +94,7 @@ simJM <- function(n, n_i, alphasim,
     if(is.matrix(Xls)){
       if(betatimeind == ncol(Xls)+1){
         Xls <- cbind(Xls, time)
-      }else if(betatimeind == 1){ # neue Bedingung hinzugefuegt
+      }else if(betatimeind == 1){ 
         Xls <- cbind(time,Xls)  
       }else{
         Xls <- cbind(Xls[,c(1:(betatimeind-1))], time, Xls[,c(betatimeind:ncol(Xls))])
@@ -244,16 +121,7 @@ simJM <- function(n, n_i, alphasim,
   
   X <- X[,-1, drop = FALSE]
   if(length(betals) != 0 && betals == 0){Xls <- Xls[,-1]}
-  
-  # if(is.null(Xls)==FALSE){
-  #   first = rep(FALSE, length(y))
-  #   for(i in 1:length(y)){
-  #     first[which.max(id==i)] = TRUE
-  #   }
-  #   Xls_un = Xls[first==1,]
-  #   Xls_un[,betatimeind] = T_surv
-  # }
-  # 
+
   return(list(
     #### longitudinal outcome
     "y" = y,
@@ -277,13 +145,8 @@ simJM <- function(n, n_i, alphasim,
     "delta" = delta))
 }
 
-cvini <- function(x, n, n_i, alphasim, beta, betas, betals, betatimeind, lambda, betat = 0, noninf = 0, noninfs = 0, noninfls = 0, 
-                  alphaini = .001, k = 10, grid1 = NULL, grid2 = NULL, grid3 = NULL){
+cvini <- function(x, df, time.effect = time.effect, k = 10, grid1 = NULL, grid2 = NULL, grid3 = NULL){
 
-  set.seed(seeds[x])
-  df <- simJM(n = n, n_i = n_i, alphasim = alpha, beta = beta, betas = betas, betals = betals, betatimeind = betatimeind, lambda = lambda, 
-              betat = betat, noninf = noninf, noninfs = noninfs, noninfls = noninfls)
-  
   if (exists("rel")) {
     if (is.null(grid1)) {grid1 <- c(seq(3, 27, 3), seq(30, 360, 30))}
     if (is.null(grid2)) {grid2 <- c(seq(3, 27, 3), seq(30, 360, 30))}
@@ -295,7 +158,8 @@ cvini <- function(x, n, n_i, alphasim, beta, betas, betals, betatimeind, lambda,
   }
   
   ## 3.1 split data set into k=10 folds --------------------------------------------------------- ##
-  set.seed(1258149)
+  # set.seed(1258149)
+  set.seed(seedmatrix[x,...])
   m <- length(unique(df$id))/k # size of each subset
   vec <- rep(seq(1:k),each=m)
   testset <- sample(vec, replace = F)
@@ -323,8 +187,8 @@ cvini <- function(x, n, n_i, alphasim, beta, betas, betals, betatimeind, lambda,
     sdf <- lapply(df, sset, testset!=kk)
     kdf <- lapply(df, sset, testset==kk)
     cv.res <- tryCatch({cvres2(data.train = sdf, data.pred = kdf, grid1 = grid1, grid2 = grid2, grid3 = grid3,
-                               betatimeind = betatimeind, alpha = alphaini)},
-                       error=function(e){cat("ERROR :",conditionMessage(e), "\n")})
+                               time.effect = time.effect)},
+                       error=function(e){cat("ERROR :", conditionMessage(e), "\n")})
     
     indarr <- indarr + cv.res$indarr
     resarr <- resarr + cv.res$likarr
@@ -335,13 +199,14 @@ cvini <- function(x, n, n_i, alphasim, beta, betas, betals, betatimeind, lambda,
   ## 3.3 combine results and find best set of iterations -------------------------------------- ##
   meanarr <- resarr/(k - indarr) # divide by the number of folds, which worked
   best <- which(meanarr == max(meanarr), arr.ind = T)
-  best.iter <- c(grid1[best[1]], grid2[best[2]], grid3[best[3]])
-  names(best.iter) <- c("ml","ms","mls")
-  return(list("best" = best.iter, "indarr" = indarr))
+  best_iter <- c(grid1[best[1]], grid2[best[2]], grid3[best[3]])
+  names(best_iter) <- c("ml","ms","mls")
+  return(best_iter)
+  return(list("best" = best_iter, "indarr" = indarr))
 }
 
 like_cv = function(y, betal, betas, betals, Xl, Xs, Xls,
-                   betatimeind, delta, T_surv, alpha, lambda, sigma2, id) {
+                   betat, delta, T_surv, alpha, lambda, sigma2, id) {
   first = rep(FALSE, length(id))
   for(i in unique(id)){
     first[which.max(id==i)] = TRUE
@@ -349,29 +214,28 @@ like_cv = function(y, betal, betas, betals, Xl, Xs, Xls,
   if(is.null(Xl)){
     Xl = as.matrix(rep(1, length(y)))
   }
-  beta_t = betals[betatimeind]
-  etals_m = (as.matrix(Xls[,-betatimeind])%*%as.matrix(betals[-betatimeind]))[first==1]
+  etals_m = (as.matrix(Xls)%*%as.matrix(betals))[first==1]
   etals = Xls%*%betals
-  etal = cbind(1,Xl)%*%betal
+  etal = cbind(1, Xl)%*%betal
   etas = Xs%*%betas
   
-  if(length(beta_t) != 0) {
-    if (beta_t != 0) {
-      integral = lambda*exp(etas)*((exp(alpha*etals_m + alpha*beta_t*T_surv) - exp(alpha*etals_m))*(1/(alpha*beta_t)))
+  # if(length(betat) != 0) {
+    if (betat != 0) {
+      integral = lambda*exp(etas)*((exp(alpha*etals_m + alpha*betat*T_surv) - exp(alpha*etals_m))*(1/(alpha*betat)))
     }else{
       integral = lambda*T_surv*exp(etas + alpha*etals_m)
     }
-  } else {
-    integral = lambda*T_surv*exp(etas + alpha*etals_m)
-  } 
+  # } else {
+  #   integral = lambda*T_surv*exp(etas + alpha*etals_m)
+  # } 
   
-  surv = delta*(log(lambda) + etas + alpha*etals_m + alpha*beta_t*T_surv) - integral
+  surv = delta*(log(lambda) + etas + alpha*etals_m + alpha*betat*T_surv) - integral
   long = log(1/sqrt(2*pi*sigma2)) - (y - etals - etal)^2/(2*sigma2)
   like = sum(surv) + sum(long)
   return(like)
 }
 
-cvres2 <- function(data.train, data.pred, grid1 = grid1, grid2 = grid2, grid3 = grid3, betatimeind, alpha = alpha){
+cvres2 <- function(data.train, data.pred, grid1 = grid1, grid2 = grid2, grid3 = grid3, time.effect = time.effect, alpha = alpha){
   
   likarr <- indarr <- array(0,c(length(grid1), length(grid2), length(grid3)),
                             dimnames = list(grid1 ,grid2, grid3))
@@ -384,12 +248,12 @@ cvres2 <- function(data.train, data.pred, grid1 = grid1, grid2 = grid2, grid3 = 
         # print(c(ml_akt, ms_akt, mls_akt))
         mod <- tryCatch({JMboost(y = data.train$y, Xl = data.train$X, Xs = data.train$Xs, Xls = data.train$Xls, delta = data.train$delta,
                                  T_long = data.train$T_long, T_surv = data.train$T_surv, id = data.train$id,
-                                 mstop_l = ml_akt, mstop_s = ms_akt, mstop_ls = mls_akt, betatimeind = betatimeind, alpha = alpha, verbose = F)},
+                                 mstop_l = ml_akt, mstop_s = ms_akt, mstop_ls = mls_akt, time.effect = time.effect, alpha = alpha, verbose = F)},
                         error=function(e){cat("ERROR :",conditionMessage(e), "\n")})
         
         like <-  tryCatch({like_cv(y=data.pred$y,  Xl=data.pred$X, Xs=data.pred$Xs, Xls=data.pred$Xls, delta=data.pred$delta,
-                                   T_surv = data.pred$T_surv, id=data.pred$id, betatimeind=betatimeind, betal=as.matrix(mod$betal),
-                                   betas=as.matrix(mod$betas) ,betals=as.matrix(mod$betals), alpha=mod$alpha, lambda=mod$lambda,
+                                   T_surv = data.pred$T_surv, id=data.pred$id, time.effect = time.effect, betal=as.matrix(c(mod$int, mod$betal)),
+                                   betas=as.matrix(mod$betas), betat = mod$betat, betals=as.matrix(mod$betals), alpha=mod$alpha, lambda=mod$lambda,
                                    sigma2=mod$sigma2)},
                           error=function(e){cat("ERROR :",conditionMessage(e), "\n")})
         
@@ -403,7 +267,6 @@ cvres2 <- function(data.train, data.pred, grid1 = grid1, grid2 = grid2, grid3 = 
       }
     }
   }
-  # return(diaarr)
   return(list("likarr" = likarr, "indarr" = indarr))
 }
 
@@ -723,7 +586,35 @@ JMboost = function(y, Xl = NULL, Xs = NULL, Xls = NULL, delta, T_long, T_surv, i
   structure(list(GAMMA0 = GAMMA0, GAMMA1 = GAMMA1, BETAL = BETAL, BETAS = BETAS,
                  BETALS = BETALS, BETAT=BETAT, INT=INT, ALPHA = ALPHA, LAMBDA = LAMBDA, SIGMA2 = SIGMA2,
                  gamma0 = gamma0, gamma1 = gamma1, betal = betal, betas = betas, betals = betals,
-                 betat=betat, int=int, alpha = alpha, lambda = lambda,  sigma2 = sigma2))
+                 betat = betat, int = int, alpha = alpha, lambda = lambda,  sigma2 = sigma2))
+}
+
+long.risk = function(y, etal, etals, sigma2){sum(-dnorm(y, mean = (etal + etals), sd = sqrt(sigma2), log = TRUE))}
+
+surv.risk = function(alpha, lambda, etas, etals_un, T_surv, delta, gamma1, betals, betat, time.effect){
+  if(time.effect){
+    if(sum(gamma1)!=0 || betat!=0){
+      integral = lambda*exp(etas)*(exp(alpha*etals_un) - exp(alpha*(etals_un - (gamma1 + betat)*T_surv)))/(alpha*(betat+gamma1))
+    }else{
+      integral = lambda*exp(etas)*exp(alpha*etals_un)*T_surv
+    }
+  }else{
+    if(sum(gamma1)!=0){
+      integral = lambda*exp(etas)*(exp(alpha*etals_un) - exp(alpha*(etals_un - gamma1*T_surv)))/(alpha*gamma1)
+    }else{
+      integral = lambda*exp(etas)*exp(alpha*etals_un)*T_surv
+    }
+  }
+  
+  risk = -sum(delta*(log(lambda) + etas + alpha*etals_un) - integral)
+  return(risk)
+}
+
+mylm = function(y,x){
+  X = cbind(1, x)
+  beta = solve(t(X) %*% X) %*% t(X) %*% y
+  RSS = sum((y - X %*% beta)^2)
+  return(list("int" = beta[1], "slp" = beta[2], "RSS" = RSS))
 }
 
 JMboostc = function(y, Xl = NULL, Xs = NULL, Xls = NULL, delta, T_long, T_surv, id, alpha=.001, lambda=.5,
@@ -1079,30 +970,305 @@ JMboostc = function(y, Xl = NULL, Xs = NULL, Xls = NULL, delta, T_long, T_surv, 
                  conv.iter = conv.iter))
 }
 
-long.risk = function(y, etal, etals, sigma2){sum(-dnorm(y, mean = (etal + etals), sd = sqrt(sigma2), log = TRUE))}
-
-surv.risk = function(alpha, lambda, etas, etals_un, T_surv, delta, gamma1, betals, betat, time.effect){
-  if(time.effect){
-    if(sum(gamma1)!=0 || betat!=0){
-      integral = lambda*exp(etas)*(exp(alpha*etals_un) - exp(alpha*(etals_un - (gamma1 + betat)*T_surv)))/(alpha*(betat+gamma1))
-    }else{
-      integral = lambda*exp(etas)*exp(alpha*etals_un)*T_surv
+estfun <- function(x, model, n, n_i, alpha, beta, betas, betals, betatimeind, lambda, betat = 0, noninf = 0, noninfs = 0, noninfls = 0, method = "boost",
+                   k = 10, grid1 = NULL, grid2 = NULL, grid3 = NULL) { # method = c("boost", "converge") 
+  repeat{
+    # simulate data with specific seed, if fits fail, change the seed (i <-  i + 1)
+    i <- i + 1
+    seed <- 8469 + x*1000 + i
+    set.seed(seed)
+    dat <- simJM(n = n, n_i = n_i, alpha = alpha, beta = beta, betas = betas, betals = betals, betatimeind = betatimeind, lambda = lambda, 
+                 betat = betat, noninf = noninf, noninfs = noninfs, noninfls = noninfls)
+    
+    df <- with(dat, data.frame(id, y, X, Xls))
+    df.id <- with(dat, data.frame("id" = unique(id), T_surv, delta, Xs))
+    
+    # little workaround to be able to run JM flexibly across various models: jointModel() resorts to the formula call of lme(). If 
+    # this formula is passed down through a function to lme() (like in mjoint()), the lme output stores a string of this function. When 
+    # jointModel() tries to convert this string into a formula again it will run into an error. Therefore we'll store a code snippet with 
+    # the model specific formula in a seperate file and source it back in. Thus jointModel() can access a correct formula and we can only 
+    # one function instead of six (or more respectively) versions of it :).
+    if (x == 1) { 
+      file_ini <- file(paste0(path, "/", sub_dir, "/", "Model_", model, ".txt"))
+      
+      writeLines(c(
+        "lmeIni <- function(df = df){",
+        paste0("fitLME <- tryCatch({ lme(", paste0("y~", paste(names(df)[3 : ncol(df)], collapse = "+")),","),
+        "                             data = df, random = ~ time | id, na.action = na.exclude, control = lmeControl(opt='optim')) }, ",
+        paste0("           error=function(e){cat(","'ERROR :'", ", conditionMessage(e),"," '/n'",")}) "),
+        "}"
+      )
+      , file_ini)
+      
+      close(file_ini)
     }
-  }else{
-    if(sum(gamma1)!=0){
-      integral = lambda*exp(etas)*(exp(alpha*etals_un) - exp(alpha*(etals_un - gamma1*T_surv)))/(alpha*gamma1)
-    }else{
-      integral = lambda*exp(etas)*exp(alpha*etals_un)*T_surv
+    
+    # +++++ JM fit +++++ # 
+    source(paste0(path, "/", sub_dir, "/", "Model_", model, ".txt"))
+    fitLME <- lmeIni(df = df)
+    fitSURV <- coxph(Surv(time = T_surv, event=delta) ~ . -id, data = df.id, x = TRUE, na.action = na.exclude)
+    fitJM <-  tryCatch({ jointModel(fitLME, fitSURV, timeVar = "time", method="piecewise-PH-aGH") }, 
+                       error=function(e){cat("ERROR :",conditionMessage(e), "/n")})
+    
+    
+    # +++++ joineRML fit +++++ # 
+    # if fitJM returnd no error, fit joineRML
+    if (!is.error(fitJM) && !is.null(fitJM)) {
+      fitJRML <- tryCatch({mjoint(formLongFixed = list(as.formula(paste0("y~", paste(names(df)[3:(ncol(df)-3)], collapse="+")))),
+                                  formLongRandom = list(~ time | id),
+                                  formSurv = Surv(time = T_surv, event = delta) ~ . -id,
+                                  data = list(df),
+                                  survData = df.id, # bei merge(df, df.id) ergeben sich doppelte Variablennamen, muessten sonst extra im code beruecksichtigt werden
+                                  timeVar = "time")},
+                          error=function(e){cat("ERROR :", conditionMessage(e), "/n")})
+      # if fitJRML is also no error, break the repeat loop, else increase i and try again
+      if (!is.error(fitJRML) && !is.null(fitJRML)) { break }
     }
   }
   
-  risk = -sum(delta*(log(lambda) + etas + alpha*etals_un) - integral)
-  return(risk)
+  # +++++ JMboost 'fit' part +++++ # 
+  if (betatimeind == 0) {
+    time.effect <- FALSE
+  } else {
+    time.effect <- TRUE
+  }
+  
+  if (method == "converge") {
+    # +++++ JMboost 'fit' +++++ # 
+    fitJMb <- tryCatch({JMboostc(y = dat$y, Xl = dat$X, Xs = dat$Xs, Xls = dat$Xls, time.effect = time.effect,
+                                 delta = dat$delta, T_long = dat$T_long, T_surv = dat$T_surv, id = dat$id, 
+                                 mstop_l = 100000, mstop_ls = 100000, mstop_s = 100000, verbose = FALSE)},
+                       error=function(e){cat("ERROR :", conditionMessage(e), "/n")})
+    
+    return(list(fitJM, fitJRML, fitJMb, seed))
+    
+  } else {
+    # +++++ JMboost Cross-validation (cv) +++++ # 
+    # cv_result <- cvini(x = x, df = dat, time.effect = time.effect)
+    # best_iter <- cv_result[[1]]
+    best_iter <- cvini(x = x, df = dat, time.effect = time.effect, k = k)
+    
+    # +++++ JMboost 'fit' +++++ # 
+    fitJMb <- tryCatch({JMboost(y = dat$y, Xl = dat$X, Xs = dat$Xs, Xls = dat$Xls, time.effect = time.effect,
+                                delta = dat$delta, T_long = dat$T_long, T_surv = dat$T_surv, id = dat$id, 
+                                mstop_l = best_iter[1], mstop_s = best_iter[2], mstop_ls = best_iter[3], verbose = FALSE)},
+                       error=function(e){cat("ERROR :", conditionMessage(e), "/n")})
+    
+    return(list(fitJM, fitJRML, fitJMb, best_iter, seed))
+  }
 }
 
-mylm = function(y,x){
-  X = cbind(1, x)
-  beta = solve(t(X) %*% X) %*% t(X) %*% y
-  RSS = sum((y - X %*% beta)^2)
-  return(list("int" = beta[1], "slp" = beta[2], "RSS" = RSS))
-}
+## ACCURACY ############################
+
+n = 100
+n_i = 5
+alpha = 0.1
+lambda = 0.6
+
+noninf <- noninfs <- noninfls <- 0
+
+# w/o fixed time effect
+betas = 0.1
+beta = c(1.5,-0.5, 0.7, 1.3, 0.3, 0.5)
+betat = 0.4
+betals = c(0.9, 0.3, -1, 0.2, -0.4)
+betatimeind = 0
+
+i <- 0
+
+AM1 <- lapply(1:100, estfun, model = "AM1", method = "converge", n = n, n_i = n_i, alpha = alpha, beta = beta[1], betas = betas, betals = 0, betatimeind = betatimeind, lambda = lambda,
+                        betat = betat, noninf = noninf, noninfs = noninfs, noninfls = noninfls)
+save(AM1,file=paste0(path, "Results/", "AM1_results.RData"))
+
+AM3 <- lapply(1:100, estfun, model = "AM3", method = "converge", n = n, n_i = n_i, alpha = alpha, beta = beta, betas = betas, betals = 0, betatimeind = betatimeind, lambda = lambda,
+              betat = betat, noninf = noninf, noninfs = noninfs, noninfls = noninfls)
+save(AM3,file=paste0(path, "Results/", "AM3_results.RData"))
+
+AM5 <- lapply(1:100, estfun, model = "AM5", method = "converge", n = n, n_i = n_i, alpha = alpha, beta = beta, betas = betas, betals = betals, betatimeind = betatimeind, lambda = lambda,
+              betat = betat, noninf = noninf, noninfs = noninfs, noninfls = noninfls)
+save(AM5,file=paste0(path, "Results/", "AM5_results.RData"))
+
+
+## w/ fixed time effect
+betas = 0.1
+beta = c(1.5,-0.5, 0.7, 1.3, 0.3, 0.5)
+betals = c(0.4, 0.9, 0.3, -1, 0.2, -0.4)
+betatimeind = 1
+
+i <- 0
+
+AM2 <- lapply(1:1, estfun, model = "AM2", method = "converge", n = n, n_i = n_i, alpha = alpha, beta = beta[1], betas = betas, betals = betals[1], betatimeind = betatimeind, lambda = lambda,
+              noninf = noninf, noninfs = noninfs, noninfls = noninfls)
+save(AM2,file=paste0(path, "Results/", "AM2_results.RData"))
+
+AM4 <- lapply(1:1, estfun, model = "AM4", method = "converge", n = n, n_i = n_i, alpha = alpha, beta = beta, betas = betas, betals = betals[1], betatimeind = betatimeind, lambda = lambda,
+              noninf = noninf, noninfs = noninfs, noninfls = noninfls)
+save(AM4,file=paste0(path, "Results/", "AM4_results.RData"))
+
+AM6 <- lapply(1:1, estfun, model = "AM6", method = "converge", n = n, n_i = n_i, alpha = alpha, beta = beta, betas = betas, betals = betals, betatimeind = betatimeind, lambda = lambda,
+              noninf = noninf, noninfs = noninfs, noninfls = noninfls)
+save(AM6,file=paste0(path, "Results/", "AM6_results.RData"))
+
+## VARIABLE SELECTION ##############################
+## V1 ##############################################
+n = 100
+n_i = 5
+alpha = 0.1
+lambda = 0.6
+
+noninf <- noninfs <- noninfls <- 5
+# 
+## w/o fixed time effect
+betas = 0.1
+beta = c(1.5,-0.5, 0.7, 1.3, 0.3, 0.5)
+betat = 0.4
+betals = c(0.9, 0.3, -1, 0.2, -0.4)
+betatimeind = 0
+
+i <- 0
+
+V1M1 <- lapply(1:100, estfun, model = "V1M1", n = n, n_i = n_i, alpha = alpha, beta = beta[1], betas = betas, betals = 0, betatimeind = betatimeind, lambda = lambda,
+                 betat = betat, noninf = noninf, noninfs = noninfs, noninfls = noninfls)
+save(V1M1,file=paste0(path, "Results/", "V1M1_results.RData"))
+
+V1M3 <- lapply(1:100, estfun, model = "V1M3", n = n, n_i = n_i, alpha = alpha, beta = beta, betas = betas, betals = 0, betatimeind = betatimeind, lambda = lambda,
+              betat = betat, noninf = noninf, noninfs = noninfs, noninfls = noninfls)
+save(V1M3,file=paste0(path, "Results/", "V1M3_results.RData"))
+
+V1M5 <- lapply(1:100, estfun, model = "V1M5", n = n, n_i = n_i, alpha = alpha, beta = beta, betas = betas, betals = betals, betatimeind = betatimeind, lambda = lambda,
+              betat = betat, noninf = noninf, noninfs = noninfs, noninfls = noninfls)
+save(V1M5,file=paste0(path, "Results/", "V1M5_results.RData"))
+
+
+## w/ fixed time effect
+betas = 0.1
+beta = c(1.5,-0.5, 0.7, 1.3, 0.3, 0.5)
+betals = c(0.4, 0.9, 0.3, -1, 0.2, -0.4)
+betatimeind = 1
+
+i <- 0
+
+V1M2 <- lapply(1:100, estfun, model = "V1M2", n = n, n_i = n_i, alpha = alpha, beta = beta[1], betas = betas, betals = betals[1], betatimeind = betatimeind, lambda = lambda,
+              noninf = noninf, noninfs = noninfs, noninfls = noninfls)
+save(V1M2,file=paste0(path, "Results/", "V1M2_results.RData"))
+
+V1M4 <- lapply(1:100, estfun, model = "V1M4", n = n, n_i = n_i, alpha = alpha, beta = beta, betas = betas, betals = betals[1], betatimeind = betatimeind, lambda = lambda,
+              noninf = noninf, noninfs = noninfs, noninfls = noninfls)
+save(V1M4,file=paste0(path, "Results/", "V1M4_results.RData"))
+
+V1M6 <- lapply(1, estfun, model = "V1M6", n = n, n_i = n_i, alpha = alpha, beta = beta, betas = betas, betals = betals, betatimeind = betatimeind, lambda = lambda,
+              noninf = noninf, noninfs = noninfs, noninfls = noninfls)
+save(V1M6,file=paste0(path, "Results/", "V1M6_results.RData"))
+
+         ## ############################################################# ##
+         ## ####################### Evaluation V1 ####################### ##
+         ## ############################################################# ##
+
+## V2 ##############################################
+n = 100
+n_i = 5
+alpha = 0.1
+lambda = 0.6
+
+noninf <- noninfs <- noninfls <- 50
+# 
+## w/o fixed time effect
+betas = 0.1
+beta = c(1.5,-0.5, 0.7, 1.3, 0.3, 0.5)
+betat = 0.4
+betals = c(0.9, 0.3, -1, 0.2, -0.4)
+betatimeind = 0
+
+i <- 0
+
+V2M1 <- lapply(1:100, estfun, model = "V2M1", n = n, n_i = n_i, alpha = alpha, beta = beta[1], betas = betas, betals = 0, betatimeind = betatimeind, lambda = lambda,
+               betat = betat, noninf = noninf, noninfs = noninfs, noninfls = noninfls)
+save(V2M1,file=paste0(path, "Results/", "V2M1_results.RData"))
+
+V2M3 <- lapply(1:100, estfun, model = "V2M3", n = n, n_i = n_i, alpha = alpha, beta = beta, betas = betas, betals = 0, betatimeind = betatimeind, lambda = lambda,
+              betat = betat, noninf = noninf, noninfs = noninfs, noninfls = noninfls)
+save(V2M3,file=paste0(path, "Results/", "V2M3_results.RData"))
+
+V2M5 <- lapply(1:100, estfun, model = "V2M5", n = n, n_i = n_i, alpha = alpha, beta = beta, betas = betas, betals = betals, betatimeind = betatimeind, lambda = lambda,
+              betat = betat, noninf = noninf, noninfs = noninfs, noninfls = noninfls)
+save(V2M5,file=paste0(path, "Results/", "V2M5_results.RData"))
+
+
+## w/ fixed time effect
+betas = 0.1
+beta = c(1.5,-0.5, 0.7, 1.3, 0.3, 0.5)
+betals = c(0.4, 0.9, 0.3, -1, 0.2, -0.4)
+betatimeind = 1
+
+i <- 0
+
+V2M2 <- lapply(1:100, estfun, model = "V2M2", n = n, n_i = n_i, alpha = alpha, beta = beta[1], betas = betas, betals = betals[1], betatimeind = betatimeind, lambda = lambda,
+              noninf = noninf, noninfs = noninfs, noninfls = noninfls)
+save(V2M2,file=paste0(path, "Results/", "V2M2_results.RData"))
+
+V2M4 <- lapply(1:100, estfun, model = "V2M4", n = n, n_i = n_i, alpha = alpha, beta = beta, betas = betas, betals = betals[1], betatimeind = betatimeind, lambda = lambda,
+              noninf = noninf, noninfs = noninfs, noninfls = noninfls)
+save(V2M4,file=paste0(path, "Results/", "V2M4_results.RData"))
+
+V2M6 <- lapply(1, estfun, model = "V2M6", n = n, n_i = n_i, alpha = alpha, beta = beta, betas = betas, betals = betals, betatimeind = betatimeind, lambda = lambda,
+              noninf = noninf, noninfs = noninfs, noninfls = noninfls)
+save(V2M6,file=paste0(path, "Results/", "V2M6_results.RData"))
+
+          ## ############################################################# ##
+          ## ####################### Evaluation V2 ####################### ##
+          ## ############################################################# ##
+
+## V3 ##############################################
+n = 100
+n_i = 5
+alpha = 0.1
+lambda = 0.6
+
+noninf <- noninfs <- noninfls <- 50
+# 
+## w/o fixed time effect
+betas = 0.1
+beta = c(1.5,-0.5, 0.7, 1.3, 0.3, 0.5)
+betat = 0.4
+betals = c(0.9, 0.3, -1, 0.2, -0.4)
+betatimeind = 0
+
+i <- 0
+
+V3M1 <- lapply(1:100, estfun, model = "V3M1", n = n, n_i = n_i, alpha = alpha, beta = beta[1], betas = betas, betals = 0, betatimeind = betatimeind, lambda = lambda,
+               betat = betat, noninf = noninf, noninfs = noninfs, noninfls = noninfls)
+save(V3M1,file=paste0(path, "Results/", "V3M1_results.RData"))
+
+V3M3 <- lapply(1:100, estfun, model = "V3M3", n = n, n_i = n_i, alpha = alpha, beta = beta, betas = betas, betals = 0, betatimeind = betatimeind, lambda = lambda,
+               betat = betat, noninf = noninf, noninfs = noninfs, noninfls = noninfls)
+save(V3M3,file=paste0(path, "Results/", "V3M3_results.RData"))
+
+V3M5 <- lapply(1:100, estfun, model = "V3M5", n = n, n_i = n_i, alpha = alpha, beta = beta, betas = betas, betals = betals, betatimeind = betatimeind, lambda = lambda,
+               betat = betat, noninf = noninf, noninfs = noninfs, noninfls = noninfls)
+save(V3M5,file=paste0(path, "Results/", "V3M5_results.RData"))
+
+
+## w/ fixed time effect
+betas = 0.1
+beta = c(1.5,-0.5, 0.7, 1.3, 0.3, 0.5)
+betals = c(0.4, 0.9, 0.3, -1, 0.2, -0.4)
+betatimeind = 1
+
+i <- 0
+
+V3M2 <- lapply(1:100, estfun, model = "V3M2", n = n, n_i = n_i, alpha = alpha, beta = beta[1], betas = betas, betals = betals[1], betatimeind = betatimeind, lambda = lambda,
+               noninf = noninf, noninfs = noninfs, noninfls = noninfls)
+save(V3M2,file=paste0(path, "Results/", "V3M2_results.RData"))
+
+V3M4 <- lapply(1:100, estfun, model = "V3M4", n = n, n_i = n_i, alpha = alpha, beta = beta, betas = betas, betals = betals[1], betatimeind = betatimeind, lambda = lambda,
+               noninf = noninf, noninfs = noninfs, noninfls = noninfls)
+save(V3M4,file=paste0(path, "Results/", "V3M4_results.RData"))
+
+V3M6 <- lapply(1, estfun, model = "V3M6", n = n, n_i = n_i, alpha = alpha, beta = beta, betas = betas, betals = betals, betatimeind = betatimeind, lambda = lambda,
+               noninf = noninf, noninfs = noninfs, noninfls = noninfls)
+save(V3M6,file=paste0(path, "Results/", "V3M6_results.RData"))
+
+            ## ############################################################# ##
+            ## ####################### Evaluation V3 ####################### ##
+            ## ############################################################# ##
+
