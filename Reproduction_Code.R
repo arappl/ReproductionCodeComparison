@@ -1254,7 +1254,7 @@ beta = c(1.5,-0.5, 0.7, 1.3, 0.3, 0.5)
 betals = c(0.4, 0.9, 0.3, -1, 0.2, -0.4)
 betatimeind = 1
 
-i <- 0
+i <- 0 
 
 V3M2 <- lapply(1:100, estfun, model = "V3M2", n = n, n_i = n_i, alpha = alpha, beta = beta[1], betas = betas, betals = betals[1], betatimeind = betatimeind, lambda = lambda,
                noninf = noninf, noninfs = noninfs, noninfls = noninfls)
