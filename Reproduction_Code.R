@@ -970,7 +970,7 @@ JMboostc = function(y, Xl = NULL, Xs = NULL, Xls = NULL, delta, T_long, T_surv, 
                  conv.iter = conv.iter))
 }
 
-estfun <- function(x, n, n_i, alpha, beta, betas, betals, betatimeind, lambda, betat = 0, noninf = 0, noninfs = 0, noninfls = 0, method = "boost",
+estFun <- function(x, n, n_i, alpha, beta, betas, betals, betatimeind, lambda, betat = 0, noninf = 0, noninfs = 0, noninfls = 0, method = "boost",
                    k = 10, grid1 = NULL, grid2 = NULL, grid3 = NULL) { # method = c("boost", "converge") 
   repeat{
     if ( (noninf + noninfs) > 100 ) {
@@ -1045,6 +1045,44 @@ estfun <- function(x, n, n_i, alpha, beta, betas, betals, betatimeind, lambda, b
   }
 }
 
+failFun <- function(z, n, n_i, alpha,
+                    beta, betas, betals, betatimeind, lambda, betat = 0, noninf = 0, noninfs = 0, noninfls = 0){
+  set.seed(541689 + z)
+  dat <- simJM(n = n, n_i = n_i, alpha = alpha, beta = beta, betas = betas, betals = betals, betatimeind = betatimeind, lambda = lambda, 
+               betat = betat, noninf = noninf, noninfs = noninfs, noninfls = noninfls)
+  noninfn <- max(noninf, noninfs, noninfls)
+  
+  Z <- lapply(1:noninfn, function(nvar, data = dat) {
+    df <- with(data, data.frame(id, y, X[, 1:(5 + nvar)], Xls[, 1:(6 + nvar)]))
+    df.id <- with(data, data.frame("id" = unique(id), T_surv, delta, Xs[, 1:nvar]))
+    
+    # +++++ JM fit +++++ # 
+    gc(TRUE)
+    fitLME <- tryCatch({ do.call("lme", list(fixed = as.formula(paste0("y~", paste(names(df)[3 : ncol(df)], collapse = "+"))), 
+                                             data = df, random = ~ time | id, na.action = na.exclude, control = lmeControl(opt='optim'))) },
+                       error = function(e){cat("ERROR :", conditionMessage(e), "/n")})
+    fitSURV <- coxph(Surv(time = T_surv, event=delta) ~ . -id, data = df.id, x = TRUE, na.action = na.exclude)
+    fitJM <-  tryCatch({ jointModel(fitLME, fitSURV, timeVar = "time", method = "piecewise-PH-aGH") }, 
+                       error = function(e){cat("ERROR :",conditionMessage(e), "/n")})
+    
+    fitJRML <- tryCatch({ mjoint(formLongFixed = list(as.formula(paste0("y~", paste(names(df)[3:ncol(df)], collapse = "+")))),
+                                 formLongRandom = list(~ time | id),
+                                 formSurv = Surv(time = T_surv, event = delta)~ . -id,
+                                 data = list(df),
+                                 survData = df.id,
+                                 timeVar = "time") }, 
+                        error=function(e){cat("ERROR :",conditionMessage(e), "/n")})
+    
+    return(c( ifelse(is.null(fitJM), 0, 1), 
+              ifelse(is.null(fitJRML), 0, 1)))
+  }
+  )
+  Z <- matrix(unlist(Z), ncol = length(Z))
+  rownames(Z) <- c("JM", "joineRML")
+  return(Z)
+}
+
+
 ## ACCURACY ############################
 
 n = 100
@@ -1063,15 +1101,15 @@ betatimeind = 0
 
 i <- 0
 
-AM1 <- lapply(1:100, estfun, method = "converge", n = n, n_i = n_i, alpha = alpha, beta = beta[1], betas = betas, betals = 0, betatimeind = betatimeind, lambda = lambda,
+AM1 <- lapply(1:100, estFun, method = "converge", n = n, n_i = n_i, alpha = alpha, beta = beta[1], betas = betas, betals = 0, betatimeind = betatimeind, lambda = lambda,
                         betat = betat, noninf = noninf, noninfs = noninfs, noninfls = noninfls)
 save(AM1,file=paste0(path, "Results/", "AM1_results.RData"))
 
-AM3 <- lapply(1:100, estfun, method = "converge", n = n, n_i = n_i, alpha = alpha, beta = beta, betas = betas, betals = 0, betatimeind = betatimeind, lambda = lambda,
+AM3 <- lapply(1:100, estFun, method = "converge", n = n, n_i = n_i, alpha = alpha, beta = beta, betas = betas, betals = 0, betatimeind = betatimeind, lambda = lambda,
               betat = betat, noninf = noninf, noninfs = noninfs, noninfls = noninfls)
 save(AM3,file=paste0(path, "Results/", "AM3_results.RData"))
 
-AM5 <- lapply(1:100, estfun, method = "converge", n = n, n_i = n_i, alpha = alpha, beta = beta, betas = betas, betals = betals, betatimeind = betatimeind, lambda = lambda,
+AM5 <- lapply(1:100, estFun, method = "converge", n = n, n_i = n_i, alpha = alpha, beta = beta, betas = betas, betals = betals, betatimeind = betatimeind, lambda = lambda,
               betat = betat, noninf = noninf, noninfs = noninfs, noninfls = noninfls)
 save(AM5,file=paste0(path, "Results/", "AM5_results.RData"))
 
@@ -1084,15 +1122,15 @@ betatimeind = 1
 
 i <- 0
 
-AM2 <- lapply(1:1, estfun, method = "converge", n = n, n_i = n_i, alpha = alpha, beta = beta[1], betas = betas, betals = betals[1], betatimeind = betatimeind, lambda = lambda,
+AM2 <- lapply(1:1, estFun, method = "converge", n = n, n_i = n_i, alpha = alpha, beta = beta[1], betas = betas, betals = betals[1], betatimeind = betatimeind, lambda = lambda,
               noninf = noninf, noninfs = noninfs, noninfls = noninfls)
 save(AM2,file=paste0(path, "Results/", "AM2_results.RData"))
 
-AM4 <- lapply(1:1, estfun, method = "converge", n = n, n_i = n_i, alpha = alpha, beta = beta, betas = betas, betals = betals[1], betatimeind = betatimeind, lambda = lambda,
+AM4 <- lapply(1:1, estFun, method = "converge", n = n, n_i = n_i, alpha = alpha, beta = beta, betas = betas, betals = betals[1], betatimeind = betatimeind, lambda = lambda,
               noninf = noninf, noninfs = noninfs, noninfls = noninfls)
 save(AM4,file=paste0(path, "Results/", "AM4_results.RData"))
 
-AM6 <- lapply(1:1, estfun, method = "converge", n = n, n_i = n_i, alpha = alpha, beta = beta, betas = betas, betals = betals, betatimeind = betatimeind, lambda = lambda,
+AM6 <- lapply(1:1, estFun, method = "converge", n = n, n_i = n_i, alpha = alpha, beta = beta, betas = betas, betals = betals, betatimeind = betatimeind, lambda = lambda,
               noninf = noninf, noninfs = noninfs, noninfls = noninfls)
 save(AM6,file=paste0(path, "Results/", "AM6_results.RData"))
 
@@ -1114,15 +1152,15 @@ betatimeind = 0
 
 i <- 0
 
-V1M1 <- lapply(1:100, estfun, n = n, n_i = n_i, alpha = alpha, beta = beta[1], betas = betas, betals = 0, betatimeind = betatimeind, lambda = lambda,
+V1M1 <- lapply(1:100, estFun, n = n, n_i = n_i, alpha = alpha, beta = beta[1], betas = betas, betals = 0, betatimeind = betatimeind, lambda = lambda,
                  betat = betat, noninf = noninf, noninfs = noninfs, noninfls = noninfls)
 save(V1M1,file=paste0(path, "Results/", "V1M1_results.RData"))
 
-V1M3 <- lapply(1:100, estfun, n = n, n_i = n_i, alpha = alpha, beta = beta, betas = betas, betals = 0, betatimeind = betatimeind, lambda = lambda,
+V1M3 <- lapply(1:100, estFun, n = n, n_i = n_i, alpha = alpha, beta = beta, betas = betas, betals = 0, betatimeind = betatimeind, lambda = lambda,
               betat = betat, noninf = noninf, noninfs = noninfs, noninfls = noninfls)
 save(V1M3,file=paste0(path, "Results/", "V1M3_results.RData"))
 
-V1M5 <- lapply(1:100, estfun, n = n, n_i = n_i, alpha = alpha, beta = beta, betas = betas, betals = betals, betatimeind = betatimeind, lambda = lambda,
+V1M5 <- lapply(1:100, estFun, n = n, n_i = n_i, alpha = alpha, beta = beta, betas = betas, betals = betals, betatimeind = betatimeind, lambda = lambda,
               betat = betat, noninf = noninf, noninfs = noninfs, noninfls = noninfls)
 save(V1M5,file=paste0(path, "Results/", "V1M5_results.RData"))
 
@@ -1135,15 +1173,15 @@ betatimeind = 1
 
 i <- 0
 
-V1M2 <- lapply(1:100, estfun, n = n, n_i = n_i, alpha = alpha, beta = beta[1], betas = betas, betals = betals[1], betatimeind = betatimeind, lambda = lambda,
+V1M2 <- lapply(1:100, estFun, n = n, n_i = n_i, alpha = alpha, beta = beta[1], betas = betas, betals = betals[1], betatimeind = betatimeind, lambda = lambda,
               noninf = noninf, noninfs = noninfs, noninfls = noninfls)
 save(V1M2,file=paste0(path, "Results/", "V1M2_results.RData"))
 
-V1M4 <- lapply(1:100, estfun, n = n, n_i = n_i, alpha = alpha, beta = beta, betas = betas, betals = betals[1], betatimeind = betatimeind, lambda = lambda,
+V1M4 <- lapply(1:100, estFun, n = n, n_i = n_i, alpha = alpha, beta = beta, betas = betas, betals = betals[1], betatimeind = betatimeind, lambda = lambda,
               noninf = noninf, noninfs = noninfs, noninfls = noninfls)
 save(V1M4,file=paste0(path, "Results/", "V1M4_results.RData"))
 
-V1M6 <- lapply(1:100, estfun, n = n, n_i = n_i, alpha = alpha, beta = beta, betas = betas, betals = betals, betatimeind = betatimeind, lambda = lambda,
+V1M6 <- lapply(1:100, estFun, n = n, n_i = n_i, alpha = alpha, beta = beta, betas = betas, betals = betals, betatimeind = betatimeind, lambda = lambda,
               noninf = noninf, noninfs = noninfs, noninfls = noninfls)
 save(V1M6,file=paste0(path, "Results/", "V1M6_results.RData"))
 
@@ -1168,15 +1206,15 @@ betatimeind = 0
 
 i <- 0
 
-V2M1 <- lapply(1:100, estfun, n = n, n_i = n_i, alpha = alpha, beta = beta[1], betas = betas, betals = 0, betatimeind = betatimeind, lambda = lambda,
+V2M1 <- lapply(1:100, estFun, n = n, n_i = n_i, alpha = alpha, beta = beta[1], betas = betas, betals = 0, betatimeind = betatimeind, lambda = lambda,
                betat = betat, noninf = noninf, noninfs = noninfs, noninfls = noninfls)
 save(V2M1,file=paste0(path, "Results/", "V2M1_results.RData"))
 
-V2M3 <- lapply(1:100, estfun, n = n, n_i = n_i, alpha = alpha, beta = beta, betas = betas, betals = 0, betatimeind = betatimeind, lambda = lambda,
+V2M3 <- lapply(1:100, estFun, n = n, n_i = n_i, alpha = alpha, beta = beta, betas = betas, betals = 0, betatimeind = betatimeind, lambda = lambda,
               betat = betat, noninf = noninf, noninfs = noninfs, noninfls = noninfls)
 save(V2M3,file=paste0(path, "Results/", "V2M3_results.RData"))
 
-V2M5 <- lapply(1:100, estfun, n = n, n_i = n_i, alpha = alpha, beta = beta, betas = betas, betals = betals, betatimeind = betatimeind, lambda = lambda,
+V2M5 <- lapply(1:100, estFun, n = n, n_i = n_i, alpha = alpha, beta = beta, betas = betas, betals = betals, betatimeind = betatimeind, lambda = lambda,
               betat = betat, noninf = noninf, noninfs = noninfs, noninfls = noninfls)
 save(V2M5,file=paste0(path, "Results/", "V2M5_results.RData"))
 
@@ -1189,15 +1227,15 @@ betatimeind = 1
 
 i <- 0
 
-V2M2 <- lapply(1:100, estfun, n = n, n_i = n_i, alpha = alpha, beta = beta[1], betas = betas, betals = betals[1], betatimeind = betatimeind, lambda = lambda,
+V2M2 <- lapply(1:100, estFun, n = n, n_i = n_i, alpha = alpha, beta = beta[1], betas = betas, betals = betals[1], betatimeind = betatimeind, lambda = lambda,
               noninf = noninf, noninfs = noninfs, noninfls = noninfls)
 save(V2M2,file=paste0(path, "Results/", "V2M2_results.RData"))
 
-V2M4 <- lapply(1:100, estfun, n = n, n_i = n_i, alpha = alpha, beta = beta, betas = betas, betals = betals[1], betatimeind = betatimeind, lambda = lambda,
+V2M4 <- lapply(1:100, estFun, n = n, n_i = n_i, alpha = alpha, beta = beta, betas = betas, betals = betals[1], betatimeind = betatimeind, lambda = lambda,
               noninf = noninf, noninfs = noninfs, noninfls = noninfls)
 save(V2M4,file=paste0(path, "Results/", "V2M4_results.RData"))
 
-V2M6 <- lapply(1:100, estfun, n = n, n_i = n_i, alpha = alpha, beta = beta, betas = betas, betals = betals, betatimeind = betatimeind, lambda = lambda,
+V2M6 <- lapply(1:100, estFun, n = n, n_i = n_i, alpha = alpha, beta = beta, betas = betas, betals = betals, betatimeind = betatimeind, lambda = lambda,
               noninf = noninf, noninfs = noninfs, noninfls = noninfls)
 save(V2M6,file=paste0(path, "Results/", "V2M6_results.RData"))
 
@@ -1222,15 +1260,15 @@ betatimeind = 0
 
 i <- 0
 
-V3M1 <- lapply(1:100, estfun, n = n, n_i = n_i, alpha = alpha, beta = beta[1], betas = betas, betals = 0, betatimeind = betatimeind, lambda = lambda,
+V3M1 <- lapply(1:100, estFun, n = n, n_i = n_i, alpha = alpha, beta = beta[1], betas = betas, betals = 0, betatimeind = betatimeind, lambda = lambda,
                betat = betat, noninf = noninf, noninfs = noninfs, noninfls = noninfls)
 save(V3M1,file=paste0(path, "Results/", "V3M1_results.RData"))
 
-V3M3 <- lapply(1:100, estfun, n = n, n_i = n_i, alpha = alpha, beta = beta, betas = betas, betals = 0, betatimeind = betatimeind, lambda = lambda,
+V3M3 <- lapply(1:100, estFun, n = n, n_i = n_i, alpha = alpha, beta = beta, betas = betas, betals = 0, betatimeind = betatimeind, lambda = lambda,
                betat = betat, noninf = noninf, noninfs = noninfs, noninfls = noninfls)
 save(V3M3,file=paste0(path, "Results/", "V3M3_results.RData"))
 
-V3M5 <- lapply(1:100, estfun, n = n, n_i = n_i, alpha = alpha, beta = beta, betas = betas, betals = betals, betatimeind = betatimeind, lambda = lambda,
+V3M5 <- lapply(1:100, estFun, n = n, n_i = n_i, alpha = alpha, beta = beta, betas = betas, betals = betals, betatimeind = betatimeind, lambda = lambda,
                betat = betat, noninf = noninf, noninfs = noninfs, noninfls = noninfls)
 save(V3M5,file=paste0(path, "Results/", "V3M5_results.RData"))
 
@@ -1243,15 +1281,15 @@ betatimeind = 1
 
 i <- 0 
 
-V3M2 <- lapply(1:100, estfun, n = n, n_i = n_i, alpha = alpha, beta = beta[1], betas = betas, betals = betals[1], betatimeind = betatimeind, lambda = lambda,
+V3M2 <- lapply(1:100, estFun, n = n, n_i = n_i, alpha = alpha, beta = beta[1], betas = betas, betals = betals[1], betatimeind = betatimeind, lambda = lambda,
                noninf = noninf, noninfs = noninfs, noninfls = noninfls)
 save(V3M2,file=paste0(path, "Results/", "V3M2_results.RData"))
 
-V3M4 <- lapply(1:100, estfun, n = n, n_i = n_i, alpha = alpha, beta = beta, betas = betas, betals = betals[1], betatimeind = betatimeind, lambda = lambda,
+V3M4 <- lapply(1:100, estFun, n = n, n_i = n_i, alpha = alpha, beta = beta, betas = betas, betals = betals[1], betatimeind = betatimeind, lambda = lambda,
                noninf = noninf, noninfs = noninfs, noninfls = noninfls)
 save(V3M4,file=paste0(path, "Results/", "V3M4_results.RData"))
 
-V3M6 <- lapply(1:100, estfun, n = n, n_i = n_i, alpha = alpha, beta = beta, betas = betas, betals = betals, betatimeind = betatimeind, lambda = lambda,
+V3M6 <- lapply(1:100, estFun, n = n, n_i = n_i, alpha = alpha, beta = beta, betas = betas, betals = betals, betatimeind = betatimeind, lambda = lambda,
                noninf = noninf, noninfs = noninfs, noninfls = noninfls)
 save(V3M6,file=paste0(path, "Results/", "V3M6_results.RData"))
 
@@ -1261,50 +1299,31 @@ save(V3M6,file=paste0(path, "Results/", "V3M6_results.RData"))
 
 ## Variable Failure ##############################################
 
-failFun <- function(z, n, n_i, alpha,
-                    beta, betas, betals, betatimeind, lambda, betat = 0, noninf = 0, noninfs = 0, noninfls = 0){
-  set.seed(541689 + z)
-  dat <- simJM(n = n, n_i = n_i, alpha = alpha, beta = beta, betas = betas, betals = betals, betatimeind = betatimeind, lambda = lambda, 
-               betat = betat, noninf = noninf, noninfs = noninfs, noninfls = noninfls)
-  noninfn <- max(noninf, noninfs, noninfls)
-  
-  Z <- lapply(1:noninfn, function(nvar, data = dat) {
-          df <- with(data, data.frame(id, y, X[, 1:(5 + nvar)], Xls[, 1:(6 + nvar)]))
-          df.id <- with(data, data.frame("id" = unique(id), T_surv, delta, Xs[, 1:nvar]))
-          
-          # +++++ JM fit +++++ # 
-          gc(TRUE)
-          fitLME <- tryCatch({ do.call("lme", list(fixed = as.formula(paste0("y~", paste(names(df)[3 : ncol(df)], collapse = "+"))), 
-                                                   data = df, random = ~ time | id, na.action = na.exclude, control = lmeControl(opt='optim'))) },
-                             error = function(e){cat("ERROR :", conditionMessage(e), "/n")})
-          fitSURV <- coxph(Surv(time = T_surv, event=delta) ~ . -id, data = df.id, x = TRUE, na.action = na.exclude)
-          fitJM <-  tryCatch({ jointModel(fitLME, fitSURV, timeVar = "time", method = "piecewise-PH-aGH") }, 
-                             error = function(e){cat("ERROR :",conditionMessage(e), "/n")})
-          
-          fitJRML <- tryCatch({ mjoint(formLongFixed = list(as.formula(paste0("y~", paste(names(df)[3:ncol(df)], collapse = "+")))),
-                                       formLongRandom = list(~ time | id),
-                                       formSurv = Surv(time = T_surv, event = delta)~ . -id,
-                                       data = list(df),
-                                       survData = df.id,
-                                       timeVar = "time") }, 
-                              error=function(e){cat("ERROR :",conditionMessage(e), "/n")})
-      
-          return(c( ifelse(is.null(fitJM), 0, 1), 
-                    ifelse(is.null(fitJRML), 0, 1)))
-        }
-       )
-    Z <- matrix(unlist(Z), ncol = length(Z))
-    rownames(Z) <- c("JM", "joineRML")
-    return(Z)
-}
-
-
 n = 100
 n_i = 5
 alpha = 0.1
 lambda = 0.6
 
-noninf <- noninfs <- noninfls <- 5
+noninf <- noninfs <- noninfls <- 250
+# 
+## w/o fixed time effect
+betas = 0.1
+beta = c(1.5,-0.5, 0.7, 1.3, 0.3, 0.5)
+betat = 0.4
+betals = c(0.9, 0.3, -1, 0.2, -0.4)
+betatimeind = 0
+
+VFM1 <- lapply(1:100, failFun, n = n, n_i = n_i, alpha = alpha, beta = beta[1], betas = betas, betals = 0, betatimeind = betatimeind, lambda = lambda,
+               betat = betat, noninf = noninf, noninfs = noninfs, noninfls = noninfls)
+save(VFM1,file=paste0(path, "Results/", "VFM1_results.RData"))
+
+VFM3 <- lapply(1:100, failFun, n = n, n_i = n_i, alpha = alpha, beta = beta, betas = betas, betals = 0, betatimeind = betatimeind, lambda = lambda,
+               betat = betat, noninf = noninf, noninfs = noninfs, noninfls = noninfls)
+save(VFM3,file=paste0(path, "Results/", "VFM3_results.RData"))
+
+VFM5 <- lapply(1:100, failFun, n = n, n_i = n_i, alpha = alpha, beta = beta, betas = betas, betals = betals, betatimeind = betatimeind, lambda = lambda,
+               betat = betat, noninf = noninf, noninfs = noninfs, noninfls = noninfls)
+save(VFM5,file=paste0(path, "Results/", "VFM5_results.RData"))
 
 ## w/ fixed time effect
 betas = 0.1
@@ -1312,5 +1331,82 @@ beta = c(1.5,-0.5, 0.7, 1.3, 0.3, 0.5)
 betals = c(0.4, 0.9, 0.3, -1, 0.2, -0.4)
 betatimeind = 1
 
-test <- lapply(1:3, failFun, n = n, n_i = n_i, alpha = alpha, beta = beta, betas = betas, betals = betals, betatimeind = betatimeind, 
-               lambda = lambda, noninf = noninf, noninfs = noninfs, noninfls = noninfls)
+VFM2 <- lapply(1:100, failFun, n = n, n_i = n_i, alpha = alpha, beta = beta[1], betas = betas, betals = betals[1], betatimeind = betatimeind, lambda = lambda,
+               noninf = noninf, noninfs = noninfs, noninfls = noninfls)
+save(VFM2,file=paste0(path, "Results/", "VFM2_results.RData"))
+
+VFM4 <- lapply(1:100, failFun, n = n, n_i = n_i, alpha = alpha, beta = beta, betas = betas, betals = betals[1], betatimeind = betatimeind, lambda = lambda,
+               noninf = noninf, noninfs = noninfs, noninfls = noninfls)
+save(VFM4,file=paste0(path, "Results/", "VFM4_results.RData"))
+
+VFM6 <- lapply(1:100, failFun, n = n, n_i = n_i, alpha = alpha, beta = beta, betas = betas, betals = betals, betatimeind = betatimeind, lambda = lambda,
+               noninf = noninf, noninfs = noninfs, noninfls = noninfls)
+save(VFM6,file=paste0(path, "Results/", "VFM6_results.RData"))
+
+## Prediction Precision ##############################################
+if (!require("JM")) install.packages("JM")
+if (!require("parallel")) install.packages("parallel")
+
+predFun <- function (x, estres) {
+  tryCatch({
+    set.seed(541689 + x)
+
+    df <- simJM(n = n, n_i = n_i, alpha = alpha, beta = beta, betas = betas, betals = betals, betatimeind = betatimeind, lambda = lambda, 
+                 betat = betat, noninf = noninf, noninfs = noninfs, noninfls = noninfls)
+ 
+    # first = rep(FALSE, length(df$y))
+    # for(i in 1:length(df$y)){
+    #   first[which.max(df$id==i)] = TRUE
+    # }
+    # Xls_un <-  as.matrix(df$Xls[first==1,])
+    # true.etas <-  as.vector(df$Xs[,1] %*% betas)
+    # true.etals_un <- as.vector(as.vector(Xls_un%*%betals) + betat*T_surv)
+    # true.risk <- lambda * exp(true.etas + alpha * true.etals_um)
+    # 
+    # etals <- df$Xls[first == 1, 2:(ncol(df$Xls) - noninfls)] %*% betals[2:6] + df$T_surv * betals[1] + rowSums(cbind(1, df$T_surv) * df$R_mean[first == 1,])
+    # 
+    # 
+    # y <- df$y
+    # Xls <- cbind(df$X, df$Xls)
+    # Xs <- df$Xs
+    # delta <- df$delta
+    # T_surv <- df$T_surv
+    # id <- df$id
+    # true.risk <- df$true.risk
+    # 
+    # res <- estres[[x]][[1]] 
+    # betal <- res$coefficients$betas[1]
+    # betals <- res$coefficients$betas[-1]
+    # betas <- res$coefficients$gammas
+    # alpha <- res$coefficients$alpha
+    # sigma2 <- res$coefficients$sigma
+    # 
+    # lambda0_i <- numeric(length(unique(df$id)))
+    # for (i in 1:length(lambda0_i)) {
+    #   baseHaz <- cbind(c(0, res$control$knots), res$coefficients$xi)
+    #   pos <- max(which((df$T_surv[i] - baseHaz[,1]) > 0))
+    #   lambda0_i[i] <- baseHaz[pos, 2]
+    # }
+    # 
+    # etal <- as.matrix(rep(1, length(y))) %*% betal
+    # etals <- Xls %*% betals
+    # etas <- Xs %*% betas
+    # 
+    # first  <- rep(FALSE, length(id))
+    # for(i in unique(id)){
+    #   first[which.max(id == i)] = TRUE
+    # }
+    # 
+    # betatimeind <- which(colnames(Xls) == "time")
+    # beta_t <- betals[betatimeind]
+    # etals_m <- (as.matrix(Xls[,-betatimeind]) %*% as.matrix(betals[-betatimeind]))[first==1] + T_surv * beta_t
+    # 
+    # y.hat <- etal + etals
+    # MSEP.y <- 1/length(y) * sum((y - y.hat)^2) 
+    # 
+    # risk.hat <- lambda0_i * exp(etas + alpha * etals_m)
+    # MSEP.risk <- 1/length(y) * sum((true.risk - risk.hat)^2)
+    # 
+    # 
+  }, error=function(e){cat("ERROR :",conditionMessage(e), "\n")})
+}
